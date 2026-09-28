@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>量化交易策略回测系统</title>
+<link rel="stylesheet" href="/static/css/style.css?v=8">
+<script src="/static/lib/echarts.min.js?v=8"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="logo">📈 量化交易策略回测系统</div>
+  <nav class="nav" id="nav">
+    <button class="nav-btn active" data-page="market">行情分析</button>
+    <button class="nav-btn" data-page="index">大盘指数</button>
+    <button class="nav-btn" data-page="lab">策略工坊</button>
+    <button class="nav-btn" data-page="box">箱体分析</button>
+    <button class="nav-btn" data-page="ml">ML预测</button>
+    <button class="nav-btn" data-page="news">资讯情绪</button>
+    <button class="nav-btn" data-page="ai">AI助手</button>
+    <button class="nav-btn" data-page="glossary">术语词典</button>
+    <button class="nav-btn" data-page="data">数据管理</button>
+    <button class="nav-btn" data-page="settings">设置</button>
+  </nav>
+</header>
+
+<main id="main">
+  <!-- 行情分析 -->
+  <section class="page active" id="page-market">
+    <div class="market-layout">
+      <div class="market-main">
+        <div class="toolbar card">
+          <input id="market-stock" class="input stock-select" list="stock-datalist" placeholder="搜索或选择股票..." autocomplete="off">
+          <select id="market-timing" class="input"></select>
+          <div id="market-timing-params" class="param-sliders"></div>
+          <select id="market-stop" class="input" title="止损策略"></select>
+          <select id="market-buy-ratio" class="input" title="买入比例">
+            <option value="0.3">30%仓</option>
+            <option value="0.5" selected>50%仓</option>
+            <option value="0.7">70%仓</option>
+            <option value="1">全仓</option>
+          </select>
+          <button class="btn primary" id="btn-apply-timing">应用择时</button>
+          <button class="btn success" id="btn-run-backtest">▶ 回测</button>
+          <button class="btn warning" id="btn-exec-trade">模拟交易</button>
+        </div>
+        <div class="card chart-card">
+          <div id="kline-chart" class="kline-chart"></div>
+        </div>
+        <div class="card account-card">
+          <div class="account-info">
+            <span>账户资金: <b id="acc-cash">--</b></span>
+            <span>总盈亏: <b id="acc-profit">--</b></span>
+            <button class="btn small danger" id="btn-acc-reset">清零重置</button>
+          </div>
+          <div id="trade-history-mini" class="trade-history-mini"></div>
+        </div>
+      </div>
+      <aside class="market-side card">
+        <h3>选股策略</h3>
+        <select id="select-strategy" class="input full"></select>
+        <button class="btn warning full" id="btn-run-select">执行选股</button>
+        <div id="select-results" class="select-results"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- 大盘指数 -->
+  <section class="page" id="page-index">
+    <div class="card">
+      <div id="index-chips" class="quick-questions"></div>
+      <div id="index-kline" class="kline-chart" style="height:68vh"></div>
+    </div>
+  </section>
+
+  <!-- 策略工坊 -->
+  <section class="page" id="page-lab">
+    <div class="lab-layout">
+      <div class="card lab-form">
+        <h3>单次回测</h3>
+        <label>股票</label>
+        <input id="lab-stock" class="input full stock-select" list="stock-datalist" placeholder="搜索或选择股票..." autocomplete="off">
+        <label>择时策略</label>
+        <select id="lab-timing" class="input full"></select>
+        <div id="lab-timing-params" class="param-sliders vertical"></div>
+        <label>止损策略</label>
+        <select id="lab-stop" class="input full"></select>
+        <label>买入比例</label>
+        <select id="lab-buy-ratio" class="input full">
+          <option value="0.3">30%</option>
+          <option value="0.5" selected>50%</option>
+          <option value="0.7">70%</option>
+          <option value="1">全仓</option>
+        </select>
+        <button class="btn primary full" id="btn-lab-backtest">运行回测</button>
+
+        <h3 style="margin-top:24px">SVM 参数寻优</h3>
+        <p class="hint">随机采样→SVM代理模型→候选验证，寻找泛化更强的MACD+止损参数组合</p>
+        <button class="btn success full" id="btn-lab-optimize">开始寻优</button>
+        <div class="progress-wrap hidden" id="optimize-progress">
+          <div class="progress-bar"><div class="progress-fill" id="optimize-fill"></div></div>
+          <div class="progress-text" id="optimize-text"></div>
+        </div>
+      </div>
+      <div class="lab-result">
+        <div id="optimize-result" class="hidden">
+          <div class="card">
+            <h3>寻优结果</h3>
+            <div id="optimize-best"></div>
+            <button class="btn primary" id="btn-apply-optimal">应用到回测面板</button>
+          </div>
+          <div class="card">
+            <h3>参数敏感性（快线×慢线收益热力图）</h3>
+            <p class="hint">最优参数若处于大片暖色平台中，说明稳健；若是孤立热点，警惕过拟合</p>
+            <div id="heatmap-chart" class="heatmap-chart"></div>
+          </div>
+        </div>
+        <div id="report-panel"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 箱体分析 -->
+  <section class="page" id="page-box">
+    <div class="card">
+      <div class="box-header">
+        <div>
+          <h3>箱体策略批量分析</h3>
+          <p class="hint">对全部本地股票识别价格箱体，匹配11种买入条件，统计各持有期胜率（T+1买入）</p>
+        </div>
+        <button class="btn primary" id="btn-box-run">开始批量分析</button>
+      </div>
+      <div class="progress-wrap hidden" id="box-progress">
+        <div class="progress-bar"><div class="progress-fill" id="box-fill"></div></div>
+        <div class="progress-text" id="box-text"></div>
+      </div>
+    </div>
+    <div id="box-results"></div>
+  </section>
+
+  <!-- ML预测 -->
+  <section class="page" id="page-ml">
+    <div class="ml-layout">
+      <div class="card ml-form">
+        <h3>机器学习涨跌预测</h3>
+        <label>股票</label>
+        <input id="ml-stock" class="input full stock-select" list="stock-datalist" placeholder="搜索或选择股票..." autocomplete="off">
+        <label>预测周期</label>
+        <select id="ml-days" class="input full">
+          <option value="3">未来3天</option>
+          <option value="5" selected>未来5天</option>
+          <option value="10">未来10天</option>
+        </select>
+        <button class="btn primary full" id="btn-ml-train">训练模型（时序交叉验证）</button>
+        <button class="btn success full" id="btn-ml-predict">预测最新走势</button>
+        <div id="ml-train-info"></div>
+      </div>
+      <div class="ml-result">
+        <div class="card"><h3>预测结果</h3><div id="ml-predict-result"><p class="hint">请先训练再预测</p></div></div>
+        <div class="card"><h3>交叉验证准确率</h3><div id="ml-cv-chart" class="ml-chart"></div></div>
+        <div class="card"><h3>特征重要性 Top8</h3><div id="ml-fi-chart" class="ml-chart"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 资讯情绪 -->
+  <section class="page" id="page-news">
+    <div class="card">
+      <div class="box-header">
+        <h3>市场情绪</h3>
+        <button class="btn primary" id="btn-news-refresh">刷新</button>
+      </div>
+      <div class="sentiment-layout">
+        <div id="sentiment-gauge" class="sentiment-gauge"></div>
+        <div id="sentiment-cards" class="sentiment-cards"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>财经快讯</h3>
+      <div id="news-feed"></div>
+    </div>
+    <div class="card">
+      <div class="box-header">
+        <h3>个股新闻（点击标题跳转原文）</h3>
+        <input id="news-stock" class="input stock-select" list="stock-datalist" placeholder="搜索或选择股票..." style="min-width:220px" autocomplete="off">
+      </div>
+      <div id="stock-news-list"><p class="hint">选择股票后加载相关新闻</p></div>
+    </div>
+  </section>
+
+  <!-- AI助手 -->
+  <section class="page" id="page-ai">
+    <div class="ai-layout card">
+      <div class="ai-header">
+        <h3>AI 智能助手</h3>
+        <div class="ai-context-bar">
+          <input id="ai-stock" class="input stock-select-empty" list="stock-datalist" placeholder="可选：附带股票上下文" autocomplete="off">
+          <label class="check"><input type="checkbox" id="ai-include-news"> 附带相关资讯</label>
+          <button class="btn small" id="btn-ai-clear">清空对话</button>
+        </div>
+      </div>
+      <div class="quick-questions">
+        <button class="chip" data-q="请分析当前股票的技术面走势">技术面分析</button>
+        <button class="chip" data-q="当前股票适合买入吗？请给出风险提示">买卖建议</button>
+        <button class="chip" data-q="解释MACD、KDJ指标在当前走势中的含义">指标解读</button>
+        <button class="chip" data-q="结合近期资讯，分析市场对该股票的情绪">资讯情绪分析</button>
+      </div>
+      <div id="ai-chat" class="ai-chat"></div>
+      <div class="ai-input-row">
+        <input id="ai-input" class="input full" placeholder="输入你的问题，回车发送...">
+        <button class="btn primary" id="btn-ai-send">发送</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 术语词典 -->
+  <section class="page" id="page-glossary">
+    <div class="glossary-layout">
+      <div class="card glossary-side">
+        <input id="glossary-search" class="input full" placeholder="搜索术语...">
+        <div id="glossary-cats"></div>
+        <div id="glossary-list"></div>
+      </div>
+      <div class="card glossary-detail" id="glossary-detail">
+        <p class="hint">点击左侧术语查看详细解释</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 数据管理 -->
+  <section class="page" id="page-data">
+    <div class="card">
+      <h3>本地数据状态</h3>
+      <div id="data-status" class="sentiment-cards"></div>
+    </div>
+    <div class="card">
+      <h3>在线更新数据</h3>
+      <div class="data-form">
+        <label>数据源</label>
+        <select id="fetch-source" class="input">
+          <option value="akshare">akshare（免费，无需Token）</option>
+          <option value="tushare">Tushare Pro（需Token）</option>
+        </select>
+        <label>股票数量</label>
+        <select id="fetch-limit" class="input">
+          <option value="50">50只</option>
+          <option value="100">100只</option>
+          <option value="200" selected>200只</option>
+          <option value="305">305只</option>
+          <option value="500">500只</option>
+        </select>
+        <label>起始日期</label>
+        <input id="fetch-start" class="input" value="20240101" placeholder="YYYYMMDD">
+        <button class="btn primary" id="btn-fetch">开始拉取</button>
+      </div>
+      <div class="progress-wrap hidden" id="fetch-progress">
+        <div class="progress-bar"><div class="progress-fill" id="fetch-fill"></div></div>
+        <div class="progress-text" id="fetch-text"></div>
+      </div>
+      <p class="hint">已存在的股票自动增量更新（只拉取新日期之后的数据）。首次拉取建议选择 akshare + 200只，约需几分钟。</p>
+    </div>
+    <div class="card">
+      <h3>股票列表</h3>
+      <div id="stock-list-table" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section class="page" id="page-settings">
+    <div class="card settings-card">
+      <h3>系统设置</h3>
+      <label>Tushare Token <span class="hint">tushare.pro 注册获取（使用Tushare数据源时需要）</span></label>
+      <input id="set-token" class="input full" placeholder="留空则保持不变">
+      <label>AI 服务商</label>
+      <select id="set-provider" class="input full"></select>
+      <p class="hint" id="provider-note"></p>
+      <label>AI API Key <span class="hint" id="key-hint"></span></label>
+      <input id="set-key" class="input full" placeholder="留空则保持不变">
+      <label>AI 模型 <span class="hint">留空使用服务商默认模型</span></label>
+      <input id="set-model" class="input full" placeholder="">
+      <label>模拟交易初始资金</label>
+      <input id="set-cash" class="input full" type="number" value="100000">
+      <label class="check" style="margin-top:12px">
+        <input type="checkbox" id="set-auto-update"> 每日收盘后（16:00）自动增量更新本地股票数据
+      </label>
+      <div style="display:flex; gap:10px; margin-top:16px">
+        <button class="btn primary" id="btn-save-settings">保存设置</button>
+        <button class="btn success" id="btn-test-ai">测试 AI 连接</button>
+      </div>
+      <div id="settings-status" class="hint"></div>
+      <div id="ai-test-result" class="hint"></div>
+    </div>
+  </section>
+</main>
+
+<!-- 全局共享的股票搜索下拉数据 -->
+<datalist id="stock-datalist"></datalist>
+
+<div id="toast" class="toast hidden"></div>
+
+<!-- 回测报告弹窗 -->
+<div id="report-modal" class="modal hidden">
+  <div class="modal-content">
+    <button class="modal-close" id="report-close">✕</button>
+    <div id="report-modal-body"></div>
+  </div>
+</div>
+
+<script src="/static/js/util.js?v=8"></script>
+<script src="/static/js/kline.js?v=8"></script>
+<script src="/static/js/report.js?v=8"></script>
+<script src="/static/js/market.js?v=8"></script>
+<script src="/static/js/lab.js?v=8"></script>
+<script src="/static/js/pages.js?v=8"></script>
+<script src="/static/js/app.js?v=8"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# 虚拟环境 / IDE
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+# 含密钥的配置与运行时数据
+data/config.json
+data/accounts.json
+data/trade_history.json
+data/backtest_cache.json
+logs/
+
+# 本地行情数据（体积大，可重新拉取）
+stock_data/*.csv
+data/indices/*.csv
