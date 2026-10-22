@@ -29,7 +29,8 @@ def create_task(func: Callable, *args, **kwargs) -> str:
             result = func(*args, progress=progress, **kwargs)
             with _lock:
                 _tasks[task_id].update(status="done", result=result,
-                                       message="完成")
+                                       message=result.get("msg", "完成") if isinstance(result, dict) else "完成",
+                                       outcome=result.get("status") if isinstance(result, dict) else None)
         except Exception as e:
             traceback.print_exc()
             with _lock:

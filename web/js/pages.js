@@ -469,13 +469,34 @@ const GlossaryPage = {
 const DataPage = {
   async init() {
     document.getElementById('btn-fetch').addEventListener('click', () => this.fetchData());
+    document.getElementById('btn-update-local').addEventListener('click', () => this.fetchData(true));
+    const settings = await API.get('/api/settings');
+    document.getElementById('fetch-source').value = settings.data_source || 'akshare';
+    this.timer = setInterval(() => {
+      if (document.getElementById('page-data').classList.contains('active')) this.refresh();
+    }, 30000);
     await this.refresh();
   },
 
   async refresh() {
     try {
       META = null; // 强制下次重新拉元信息
-      const s = (await API.get('/api/meta')).data_status;
+      const meta = await API.get('/api/meta');
+      const s = meta.data_status;
+      const u = meta.update_status || {};
+      const rstate = u.last_result || {};
+      const settings = await API.get('/api/settings');
+      document.getElementById('update-status').textContent = [
+        `主数据源：${settings.data_source || 'akshare'}；最近尝试源：${u.source || '--'}`,
+        `最近尝试：${u.last_attempt || '--'}`,
+        `最近成功：${u.last_success || '--'}`,
+        `数据截止：${s.latest_date || '--'}（逐股截止见下表）`,
+        rstate.msg || '',
+        ...(rstate.warnings || []),
+        ...((rstate.items || []).filter(x => x.status === 'failed' || x.status === 'no_new_data')
+          .map(x => `${x.name}: ${x.interface || ''} ${x.category || ''} ${x.reason || '尚未覆盖目标交易日'}`)),
+        u.scheduler && u.scheduler.error ? `自动调度：${u.scheduler.error}` : ''
+      ].join('\n');
       document.getElementById('data-status').innerHTML = `
         <div class="metric-card"><div class="v">${s.stock_count}</div><div class="k">本地股票数</div></div>
         <div class="metric-card"><div class="v" style="font-size:14px">${s.earliest_date || '--'}</div><div class="k">最早数据</div></div>
@@ -488,13 +509,14 @@ const DataPage = {
     } catch (e) { toast(e.message); }
   },
 
-  async fetchData() {
+  async fetchData(localOnly = false) {
     const btn = document.getElementById('btn-fetch');
     const wrap = document.getElementById('fetch-progress');
     btn.disabled = true;
+    document.getElementById('btn-update-local').disabled = true;
     wrap.classList.remove('hidden');
     try {
-      const { task_id } = await API.post('/api/data/fetch', {
+      const { task_id } = await API.post(localOnly ? '/api/data/update' : '/api/data/fetch', {
         source: document.getElementById('fetch-source').value,
         limit: Number(document.getElementById('fetch-limit').value),
         start: document.getElementById('fetch-start').value.trim()
@@ -504,11 +526,14 @@ const DataPage = {
         document.getElementById('fetch-fill').style.width = pct + '%';
         document.getElementById('fetch-text').textContent = `${msg} (${cur}/${total})`;
       });
+      document.getElementById('fetch-text').textContent = r.msg;
+      document.getElementById('fetch-text').style.color = r.ok ? '#10b981' : '#dc2626';
       toast(r.msg || '拉取完成', 4000);
       await this.refresh();
       await refreshAllStockSelects();
     } catch (e) { toast(e.message); }
     btn.disabled = false;
+    document.getElementById('btn-update-local').disabled = false;
   }
 };
 
@@ -517,6 +542,21 @@ const SettingsPage = {
   providers: {},
 
   async init() {
+    document.getElementById('btn-test-data').addEventListener('click', async () => {
+      const box = document.getElementById('data-test-result');
+      const button = document.getElementById('btn-test-data');
+      button.disabled = true;
+      box.textContent = '诊断中…（使用已保存的 Token）';
+      try {
+        const { task_id } = await API.post('/api/data/diagnose', {
+          source: document.getElementById('set-data-source').value
+        });
+        const result = await pollTask(task_id);
+        box.textContent = `${result.source}\n` + result.checks.map(c =>
+          `${c.interface}: ${c.ok ? '可用' : c.category} — ${c.reason}`).join('\n');
+      } catch (e) { box.textContent = e.message; }
+      finally { button.disabled = false; }
+    });
     document.getElementById('btn-save-settings').addEventListener('click', () => this.save());
     document.getElementById('btn-test-ai').addEventListener('click', () => this.testAi());
     document.getElementById('set-provider').addEventListener('change', () => {
@@ -555,6 +595,7 @@ const SettingsPage = {
     try {
       const s = await API.get('/api/settings');
       this.providers = s.ai_providers || {};
+      document.getElementById('set-data-source').value = s.data_source || 'akshare';
       const sel = document.getElementById('set-provider');
       if (!sel.options.length) {
         sel.innerHTML = Object.entries(this.providers)
@@ -588,6 +629,7 @@ const SettingsPage = {
       ai_provider: document.getElementById('set-provider').value,
       ai_model: document.getElementById('set-model').value.trim(),
       initial_cash: Number(document.getElementById('set-cash').value),
+      data_source: document.getElementById('set-data-source').value,
       auto_update: document.getElementById('set-auto-update').checked
     };
     if (token) body.tushare_token = token;

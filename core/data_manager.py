@@ -98,8 +98,8 @@ def get_data_status() -> Dict:
     """本地数据总体状态：股票数、日期覆盖范围"""
     names, paths = get_stock_file_list()
     latest, earliest = None, None
-    # 抽样最多20只统计日期范围，避免全量扫描慢
-    sample = paths[:20]
+    # 覆盖所有文件；抽样会隐藏未更新的股票，逐股截止由列表接口展示。
+    sample = paths
     for p in sample:
         try:
             df = pd.read_csv(p, encoding="utf-8-sig", usecols=[0])
