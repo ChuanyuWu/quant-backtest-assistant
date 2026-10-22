@@ -20,4 +20,4 @@ if errorlevel 1 (
 )
 echo Starting server...
 python start.py
-pause
+if errorlevel 1 pause

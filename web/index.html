@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>量化交易策略回测系统</title>
-<link rel="stylesheet" href="/static/css/style.css?v=8">
-<script src="/static/lib/echarts.min.js?v=8"></script>
+<link rel="stylesheet" href="/static/css/style.css?v=20261021-data2">
+<script src="/static/lib/echarts.min.js?v=20261021-data2"></script>
 </head>
 <body>
 <header class="topbar">
@@ -232,6 +232,7 @@
     <div class="card">
       <h3>本地数据状态</h3>
       <div id="data-status" class="sentiment-cards"></div>
+      <pre id="update-status" class="hint" style="white-space:pre-wrap"></pre>
     </div>
     <div class="card">
       <h3>在线更新数据</h3>
@@ -252,12 +253,13 @@
         <label>起始日期</label>
         <input id="fetch-start" class="input" value="20240101" placeholder="YYYYMMDD">
         <button class="btn primary" id="btn-fetch">开始拉取</button>
+        <button class="btn" id="btn-update-local">更新本地股票（主数据源）</button>
       </div>
       <div class="progress-wrap hidden" id="fetch-progress">
         <div class="progress-bar"><div class="progress-fill" id="fetch-fill"></div></div>
         <div class="progress-text" id="fetch-text"></div>
       </div>
-      <p class="hint">已存在的股票自动增量更新（只拉取新日期之后的数据）。首次拉取建议选择 akshare + 200只，约需几分钟。</p>
+      <p class="hint">保持前复权口径，全量刷新已有历史；失败保留原文件。手动拉取使用上方数据源，自动更新使用设置中的主数据源。</p>
     </div>
     <div class="card">
       <h3>股票列表</h3>
@@ -269,6 +271,10 @@
   <section class="page" id="page-settings">
     <div class="card settings-card">
       <h3>系统设置</h3>
+      <label>主数据源（用于自动更新及更新本地股票）</label>
+      <select id="set-data-source" class="input full"><option value="akshare">AkShare（免费优先）</option><option value="tushare">Tushare（需要日线和复权因子权限）</option></select>
+      <button class="btn" id="btn-test-data">诊断已保存的数据源配置</button>
+      <pre id="data-test-result" class="hint" style="white-space:pre-wrap"></pre>
       <label>Tushare Token <span class="hint">tushare.pro 注册获取（使用Tushare数据源时需要）</span></label>
       <input id="set-token" class="input full" placeholder="留空则保持不变">
       <label>AI 服务商</label>
@@ -281,7 +287,7 @@
       <label>模拟交易初始资金</label>
       <input id="set-cash" class="input full" type="number" value="100000">
       <label class="check" style="margin-top:12px">
-        <input type="checkbox" id="set-auto-update"> 每日收盘后（16:00）自动增量更新本地股票数据
+        <input type="checkbox" id="set-auto-update"> 每日收盘后（上海时间17:30）自动更新本地股票；失败自动重试
       </label>
       <div style="display:flex; gap:10px; margin-top:16px">
         <button class="btn primary" id="btn-save-settings">保存设置</button>
@@ -306,12 +312,12 @@
   </div>
 </div>
 
-<script src="/static/js/util.js?v=8"></script>
-<script src="/static/js/kline.js?v=8"></script>
-<script src="/static/js/report.js?v=8"></script>
-<script src="/static/js/market.js?v=8"></script>
-<script src="/static/js/lab.js?v=8"></script>
-<script src="/static/js/pages.js?v=8"></script>
-<script src="/static/js/app.js?v=8"></script>
+<script src="/static/js/util.js?v=20261021-data2"></script>
+<script src="/static/js/kline.js?v=20261021-data2"></script>
+<script src="/static/js/report.js?v=20261021-data2"></script>
+<script src="/static/js/market.js?v=20261021-data2"></script>
+<script src="/static/js/lab.js?v=20261021-data2"></script>
+<script src="/static/js/pages.js?v=20261021-data2"></script>
+<script src="/static/js/app.js?v=20261021-data2"></script>
 </body>
 </html>

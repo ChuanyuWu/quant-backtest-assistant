@@ -11,10 +11,14 @@ import pandas as pd
 from fastapi import FastAPI, Query, Body
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 
 from config.app_config import AppConfig
 from core import data_manager, indicators, cache, fetcher
 from core.data_io import load_json
+from core.update_state import read_state, revision
+from core.update_scheduler import tick
 from core.settings import get_settings, update_settings
 from core.execution_engine import ExecutionEngine
 from core.virtual_trade import BUILTIN_STOP_STRATEGIES, StopLossParams
@@ -31,20 +35,22 @@ from server import tasks
 
 app = FastAPI(title="量化交易策略回测系统")
 
+
+@app.middleware("http")
+async def revalidate_frontend(request, call_next):
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
 # ML模型缓存（按 股票+预测周期 缓存，键为 (name, target_days)）
 _ml_models = {}
 
 
 @app.on_event("startup")
 def _on_startup():
-    """服务启动时：合并同代码重复股票文件 + 拉起每日自动更新线程"""
+    """启动可恢复的每日更新；异名文件在完整行情验证成功后清理。"""
     import threading
-    try:
-        removed = data_manager.dedupe_stock_files()
-        if removed:
-            print(f"[启动] 已合并 {removed} 个重复股票文件")
-    except Exception as e:
-        print(f"[启动] 重复文件清理失败（不影响使用）: {e}")
     threading.Thread(target=_auto_update_loop, daemon=True).start()
 
 # ---------------- 工具 ----------------
@@ -108,6 +114,7 @@ def api_meta():
                             "desc": s["desc"]}
                            for s in BOX_STRATEGIES],
         "data_status": data_manager.get_data_status(),
+        "update_status": read_state(),
     }
 
 
@@ -228,6 +235,7 @@ def api_backtest(payload: dict = Body(...)):
     cache_key = {"name": name, "timing": timing, "tp": tp,
                  "buy_ratio": buy_ratio, "stop": stop_dict,
                  "initial_cash": initial_cash,
+                 "revision": revision(df),
                  "rows": len(df),
                  "last_date": str(df["交易日期"].iloc[-1].date())}
     if use_cache:
@@ -317,6 +325,12 @@ def api_trade_execute(payload: dict = Body(...)):
 
 # ---------------- 异步任务：优化/箱体/数据拉取 ----------------
 
+class DataFetchRequest(BaseModel):
+    source: Optional[Literal["akshare", "tushare"]] = None
+    limit: int = Field(default=200, ge=1, le=6000)
+    start: str = Field(default="20240101", pattern=r"^\d{8}$")
+    end: Optional[str] = Field(default=None, pattern=r"^\d{8}$")
+
 @app.post("/api/optimize")
 def api_optimize(payload: dict = Body(...)):
     name = payload.get("name", "")
@@ -342,11 +356,9 @@ def api_box_batch(payload: dict = Body(...)):
 
 
 @app.post("/api/data/fetch")
-def api_data_fetch(payload: dict = Body(...)):
-    source = payload.get("source", "akshare")
-    limit = int(payload.get("limit", 200))
-    start = payload.get("start", "20240101")
-    end = payload.get("end")
+def api_data_fetch(payload: DataFetchRequest):
+    source = payload.source or get_settings().get("data_source", "akshare")
+    limit, start, end = payload.limit, payload.start, payload.end
 
     def job(progress=None):
         return fetcher.fetch_stock_data(source, limit, start, end, progress)
@@ -358,6 +370,21 @@ def api_data_fetch(payload: dict = Body(...)):
 def api_task(task_id: str):
     tasks.cleanup_tasks()
     return tasks.get_task(task_id)
+
+
+@app.post("/api/data/diagnose")
+def api_data_diagnose(payload: dict = Body(...)):
+    source = payload.get("source", get_settings().get("data_source", "akshare"))
+    if source not in ("akshare", "tushare"):
+        return _err("未知数据源")
+    return {"task_id": tasks.create_task(lambda progress=None: fetcher.diagnose(source))}
+
+
+@app.post("/api/data/update")
+def api_data_update():
+    source = get_settings().get("data_source", "akshare")
+    return {"task_id": tasks.create_task(
+        lambda progress=None: fetcher.update_local_stocks(source, progress=progress))}
 
 
 # ---------------- ML预测 ----------------
@@ -372,7 +399,7 @@ def api_ml_train(payload: dict = Body(...)):
     predictor = StockPredictor()
     report = predictor.train(df, td)
     if "error" not in report:
-        _ml_models[(name, td)] = predictor
+        _ml_models[(name, td)] = (revision(df), predictor)
     report["target_days"] = td
     return report
 
@@ -385,13 +412,14 @@ def api_ml_predict(payload: dict = Body(...)):
     if df is None:
         return _err(f"未找到股票数据: {name}", 404)
     # 模型按 股票+周期 匹配；没训过该周期就自动用该周期训练
-    predictor = _ml_models.get((name, td))
+    entry = _ml_models.get((name, td))
+    predictor = entry[1] if entry and entry[0] == revision(df) else None
     if predictor is None:
         predictor = StockPredictor()
         report = predictor.train(df, td)
         if "error" in report:
             return report
-        _ml_models[(name, td)] = predictor
+        _ml_models[(name, td)] = (revision(df), predictor)
     out = predictor.predict(df)
     out["target_days"] = td
     return out
@@ -484,6 +512,8 @@ def api_get_settings():
 
 @app.post("/api/settings")
 def api_set_settings(payload: dict = Body(...)):
+    if "data_source" in payload and payload["data_source"] not in ("akshare", "tushare"):
+        return _err("未知数据源")
     # 含*的是脱敏值，不覆盖
     clean = {k: v for k, v in payload.items()
              if v is not None and "*" not in str(v)}
@@ -542,33 +572,16 @@ def index():
 app.mount("/static", StaticFiles(directory=AppConfig.WEB_DIR), name="static")
 
 
-# ---------------- 每日自动增量更新 ----------------
+# ---------------- 每日自动更新 ----------------
 
 def _auto_update_loop():
-    """后台线程：开启 auto_update 后，每个交易日16:00自动更新本地已有股票
-
-    只更新本地列表，不引入新股票池（避免跌出市值 top-N 的股票停止更新）。
-    """
-    import time as _time
-    last_run_date = {"d": None}
+    import time
     while True:
         try:
-            settings = get_settings()
-            now = datetime.datetime.now()
-            if (settings.get("auto_update")
-                    and now.weekday() < 5
-                    and now.hour >= 16
-                    and last_run_date["d"] != now.date()):
-                names, _ = data_manager.get_stock_file_list()
-                if names:
-                    print(f"[自动更新] {now} 开始更新 {len(names)} 只本地股票...")
-                    source = settings.get("data_source", "akshare")
-                    result = fetcher.update_local_stocks(source)
-                    print(f"[自动更新] 完成: {result.get('msg')}")
-                last_run_date["d"] = now.date()
-        except Exception as e:
-            print(f"[自动更新] 异常: {e}")
-        _time.sleep(60)
+            tick()
+        except Exception as exc:
+            print(f"[自动更新] {fetcher.redact(exc)}")
+        time.sleep(60)
 
 
 def run():

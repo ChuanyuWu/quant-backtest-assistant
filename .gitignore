@@ -14,3 +14,10 @@ logs/
 # 本地行情数据（体积大，可重新拉取）
 stock_data/*.csv
 data/indices/*.csv
+
+# Update runtime state and locks
+data/updates.json
+data/updates.json.lock
+data/trade_calendar.json
+data/scheduler.lock
+data/locks/
